@@ -1,0 +1,7 @@
+torch>=1.9.0
+torchvision>=0.10.0
+segmentation-models-pytorch>=0.3.0
+albumentations>=1.1.0
+opencv-python>=4.5.0
+pillow>=8.0.0
+numpy>=1.21.0
