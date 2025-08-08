@@ -53,20 +53,24 @@ class PIDSegmentationModel(LabelStudioMLBase):
         self.from_name = None
         self.to_name = None
         self.value = None
-        
+
         for tag_name, tag_info in self.parsed_label_config.items():
-            if tag_info['type'] == 'BrushLabels':
+            if tag_info.get('type') == 'BrushLabels':
                 self.from_name = tag_name
-                self.to_name = tag_info['to_name'][0]
+                # to_name is always a list
+                self.to_name = tag_info.get('to_name', [None])[0]
+                # inputs is a list of dicts; take first dict’s 'value'
                 inputs = tag_info.get('inputs', [])
-                if inputs and isinstance(inputs, list):
-                    self.value = inputs.get('value')
-                else:
-                    self.value = None
+                if isinstance(inputs, list) and inputs:
+                    first_input = inputs[0]
+                    self.value = first_input.get('value')
                 break
-        
-        if not self.from_name:
-            logger.warning("No BrushLabels found in labeling config")
+
+        if not all([self.from_name, self.to_name, self.value]):
+            logger.warning(
+                f"BrushLabels config incomplete: from_name={self.from_name}, "
+                f"to_name={self.to_name}, value={self.value}"
+            )
 
     def _lazy_init(self):
         """Initialize model and transforms on first use"""
@@ -228,5 +232,6 @@ class PIDSegmentationModel(LabelStudioMLBase):
             logger.info("New annotation available for potential model updating")
             
         return {'status': 'ok'}
+
 
 
