@@ -11,7 +11,6 @@ from albumentations.pytorch import ToTensorV2
 import segmentation_models_pytorch as smp
 from label_studio_ml.model import LabelStudioMLBase
 from label_studio_ml.response import ModelResponse
-from label_studio_ml.utils import get_single_tag_key
 from label_studio_converter.brush import encode_rle, decode_rle
 
 logger = logging.getLogger(__name__)
@@ -225,3 +224,4 @@ class PIDSegmentationModel(LabelStudioMLBase):
             logger.info("New annotation available for potential model updating")
             
         return {'status': 'ok'}
+
