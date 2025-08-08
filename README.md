@@ -38,10 +38,11 @@ cd pid-segmentation-backend
 export DOCKER_BUILDKIT=1
 docker-compose up --build
 ```
-3. Access the backend at `http://20.244.9.92:8080/`
+3. Access the backend at `http://<YOUR_SERVER_IP>:8080`
 
 4. In Label Studio, connect the ML backend:
-- **Backend URL**: `http://<YOUR_SERVER_IP>:8080`
+- **Backend URL**: `http://20.244.9.92:8080/`
 - Enable **Use predictions to prelabel tasks** and **Interactive preannotations**.
 
 The server will log health checks and inference requests to the console.
+
