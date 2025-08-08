@@ -33,7 +33,7 @@ logging.config.dictConfig({
 })
 
 from label_studio_ml.api import init_app
-from model import NewModel
+from model import PIDSegmentationModel as NewModel
 
 
 _DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'config.json')
@@ -123,3 +123,4 @@ if __name__ == "__main__":
 else:
     # for uWSGI use
     app = init_app(model_class=NewModel)
+
