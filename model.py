@@ -58,7 +58,11 @@ class PIDSegmentationModel(LabelStudioMLBase):
             if tag_info['type'] == 'BrushLabels':
                 self.from_name = tag_name
                 self.to_name = tag_info['to_name'][0]
-                self.value = tag_info['inputs']['value']
+                inputs = tag_info.get('inputs', [])
+                if inputs and isinstance(inputs, list):
+                    self.value = inputs.get('value')
+                else:
+                    self.value = None
                 break
         
         if not self.from_name:
@@ -224,4 +228,5 @@ class PIDSegmentationModel(LabelStudioMLBase):
             logger.info("New annotation available for potential model updating")
             
         return {'status': 'ok'}
+
 
