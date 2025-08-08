@@ -6,6 +6,7 @@ opencv-python>=4.5.0
 pillow>=8.0.0
 numpy>=1.21.0
 label-studio-ml>=1.0.0
-label-studio-converter>=1.0.0
+label-studio-converter
 gdown>=0.3.0
+
 requests>=2.25.0
