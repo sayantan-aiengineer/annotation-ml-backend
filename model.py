@@ -11,17 +11,15 @@ from albumentations.pytorch import ToTensorV2
 import segmentation_models_pytorch as smp
 from label_studio_ml.model import LabelStudioMLBase
 from label_studio_ml.response import ModelResponse
-from label_studio_ml.utils import get_single_tag_key, get_choice, is_skipped
-from label_studio.core.utils.io import json_load
-from label_studio_converter.brush import encode_rle
+from label_studio_ml.utils import get_single_tag_key
+from label_studio_converter.brush import encode_rle, decode_rle
 
 logger = logging.getLogger(__name__)
 
 class PIDSegmentationModel(LabelStudioMLBase):
-    """U-Net based semantic segmentation model for P&ID line classification"""
+    """U-Net based semantic segmentation model for P&ID line classification using brush labels"""
     
     def __init__(self, **kwargs):
-        # Initialize the ML backend
         super(PIDSegmentationModel, self).__init__(**kwargs)
         
         # Model configuration
@@ -30,29 +28,42 @@ class PIDSegmentationModel(LabelStudioMLBase):
         self.img_size = int(os.environ.get('IMG_SIZE', '1024'))
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
-        # Class labels corresponding to your 8 classes
+        # Class labels (index 0 is background, 1-7 are your line types)
         self.class_labels = [
-            '0',
-            '1',
-            '2', 
-            '3',
-            '4',
-            '5',
-            '6',
-            '7'
+            '0',  # index 0 - not used in Label Studio
+            '1',       # index 1
+            '2',      # index 2
+            '3',   # index 3
+            '4',    # index 4
+            '5',   # index 5
+            '6',   # index 6
+            '7'       # index 7
         ]
         
         # Model and transforms will be loaded lazily
         self.model = None
         self.transform = None
         
-        # Parse labeling config
-        from_name, to_name, value = self.get_first_tag_occurence('BrushLabels', 'Image')
-        self.from_name = from_name
-        self.to_name = to_name
-        self.value = value
+        # Parse labeling config for brush labels
+        self._parse_config()
         
         logger.info(f"Initialized PID Segmentation Model with {self.num_classes} classes")
+
+    def _parse_config(self):
+        """Parse Label Studio config to get brush label information"""
+        self.from_name = None
+        self.to_name = None
+        self.value = None
+        
+        for tag_name, tag_info in self.parsed_label_config.items():
+            if tag_info['type'] == 'BrushLabels':
+                self.from_name = tag_name
+                self.to_name = tag_info['to_name'][0]
+                self.value = tag_info['inputs']['value']
+                break
+        
+        if not self.from_name:
+            logger.warning("No BrushLabels found in labeling config")
 
     def _lazy_init(self):
         """Initialize model and transforms on first use"""
@@ -61,8 +72,8 @@ class PIDSegmentationModel(LabelStudioMLBase):
             
             # Load the model
             self.model = smp.Unet(
-                encoder_name='resnet34',
-                encoder_weights=None,  # Don't load imagenet weights
+                encoder_name='resnet50',
+                encoder_weights=None,
                 in_channels=3,
                 classes=self.num_classes,
                 activation=None
@@ -87,41 +98,15 @@ class PIDSegmentationModel(LabelStudioMLBase):
             
             logger.info("Model and transforms loaded successfully")
 
-    def get_first_tag_occurence(self, control_type, object_type):
-        """Get the first occurrence of a tag from labeling config"""
-        from_name, to_name, value = None, None, None
-        
-        for tag_name, tag_info in self.parsed_label_config.items():
-            if tag_info['type'] == control_type:
-                from_name = tag_name
-                to_name = tag_info['to_name'][0]
-                value = tag_info['inputs'][0]['value']
-                break
-                
-        return from_name, to_name, value
-
     def _load_image_from_url(self, url):
         """Load image from URL or local path"""
         try:
-            # Handle data URLs (base64 encoded images)
-            if url.startswith('data:image'):
-                # Extract base64 data
-                header, encoded = url.split(',', 1)
-                data = base64.b64decode(encoded)
-                image = Image.open(io.BytesIO(data)).convert('RGB')
-                return np.array(image)
-            else:
-                # Handle local file paths or URLs
-                if url.startswith('/data/'):
-                    # Local file in Label Studio
-                    image = cv2.imread(url)
-                    if image is None:
-                        raise ValueError(f"Could not load image from {url}")
-                    return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                else:
-                    # Handle URLs or other paths
-                    image = Image.open(url).convert('RGB')
-                    return np.array(image)
+            # Use Label Studio's built-in method to handle all URL types
+            local_path = self.get_local_path(url)
+            image = cv2.imread(local_path)
+            if image is None:
+                raise ValueError(f"Could not load image from {local_path}")
+            return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         except Exception as e:
             logger.error(f"Error loading image from {url}: {e}")
             raise
@@ -130,7 +115,7 @@ class PIDSegmentationModel(LabelStudioMLBase):
         """Run inference on a single image"""
         self._lazy_init()
         
-        # Preprocess image
+        # Store original dimensions
         original_h, original_w = image.shape[:2]
         
         # Apply transforms
@@ -143,23 +128,30 @@ class PIDSegmentationModel(LabelStudioMLBase):
             pred_mask = torch.argmax(logits, dim=1).squeeze(0).cpu().numpy()
         
         # Resize back to original size
-        pred_mask = cv2.resize(pred_mask.astype(np.uint8), (original_w, original_h), 
-                              interpolation=cv2.INTER_NEAREST)
+        pred_mask = cv2.resize(
+            pred_mask.astype(np.uint8), 
+            (original_w, original_h), 
+            interpolation=cv2.INTER_NEAREST
+        )
         
         return pred_mask
 
-    def _mask_to_rle(self, mask, class_idx):
-        """Convert binary mask to RLE format for Label Studio"""
+    def _mask_to_rle(self, mask, class_idx, original_width, original_height):
+        """Convert binary mask to RLE format for Label Studio brush labels"""
         # Create binary mask for specific class
         binary_mask = (mask == class_idx).astype(np.uint8)
         
         # Skip if no pixels of this class
         if binary_mask.sum() == 0:
             return None
-            
-        # Convert to RLE
-        rle = encode_rle(binary_mask)
-        return rle
+        
+        # Convert to RLE using Label Studio's encoder
+        try:
+            rle = encode_rle(binary_mask)
+            return rle
+        except Exception as e:
+            logger.error(f"Error encoding RLE for class {class_idx}: {e}")
+            return None
 
     def predict(self, tasks, context=None, **kwargs):
         """Main prediction method called by Label Studio"""
@@ -169,70 +161,67 @@ class PIDSegmentationModel(LabelStudioMLBase):
         
         for task in tasks:
             try:
-                # Skip if task is already annotated
-                if is_skipped(task):
+                # Get image URL from task data
+                if not self.value or self.value not in task['data']:
+                    logger.error(f"No image data found in task")
                     predictions.append(ModelResponse(task=task, result=[]))
                     continue
                 
-                # Get image URL from task data
                 image_url = task['data'][self.value]
                 
                 # Load and process image
                 image = self._load_image_from_url(image_url)
+                original_height, original_width = image.shape[:2]
                 
                 # Get prediction mask
                 pred_mask = self._predict_mask(image)
                 
-                # Convert mask to Label Studio format
+                # Convert mask to Label Studio brush format
                 result = []
                 
-                for class_idx in range(1, self.num_classes):  # Skip background (class 0)
-                    rle = self._mask_to_rle(pred_mask, class_idx)
+                # Process each class (skip background class 0)
+                for class_idx in range(1, self.num_classes):
+                    rle = self._mask_to_rle(pred_mask, class_idx, original_width, original_height)
                     
                     if rle is not None:
-                        # Create brush annotation
+                        # Create brush annotation result
                         brush_result = {
                             'from_name': self.from_name,
                             'to_name': self.to_name,
                             'type': 'brushlabels',
                             'value': {
                                 'brushlabels': [self.class_labels[class_idx]],
-                                'rle': rle
-                            }
+                                'rle': rle,
+                                'format': 'rle'
+                            },
+                            'original_width': original_width,
+                            'original_height': original_height,
+                            'image_rotation': 0
                         }
                         result.append(brush_result)
                 
                 # Create model response
-                model_response = ModelResponse(
+                predictions.append(ModelResponse(
                     task=task,
                     result=result,
-                    score=0.85  # Confidence score
-                )
-                predictions.append(model_response)
+                    score=0.85,  # Confidence score
+                    model_version=self.get("model_version", "1.0.0")
+                ))
                 
                 logger.info(f"Generated {len(result)} predictions for task {task.get('id', 'unknown')}")
                 
             except Exception as e:
                 logger.error(f"Error processing task {task.get('id', 'unknown')}: {e}")
-                # Return empty prediction on error
                 predictions.append(ModelResponse(task=task, result=[]))
         
         return predictions
 
     def fit(self, event, data, **kwargs):
-        """Training method - can be used for online learning or model updates"""
+        """Training method - can be used for online learning"""
         logger.info(f"Fit method called with event: {event}")
         
-        # For now, we'll just log the event
         # You could implement online learning or model fine-tuning here
-        
-        # Extract annotations from the data if needed
         if event in ['ANNOTATION_CREATED', 'ANNOTATION_UPDATED']:
             logger.info("New annotation available for potential model updating")
             
         return {'status': 'ok'}
-
-# Optional: Add health check endpoint
-def health_check():
-    """Health check for the ML backend"""
-    return {'status': 'healthy', 'model': 'PID Segmentation U-Net'}

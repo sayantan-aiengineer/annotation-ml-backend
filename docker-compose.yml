@@ -1,35 +1,43 @@
-version: "3.10"
+version: "3.8"
 
 services:
   ml-backend:
     container_name: ml-backend
-    image: humansignal/ml-backend:v0
     build:
       context: .
       args:
-        TEST_ENV: ${TEST_ENV}
+        TEST_ENV: ${TEST_ENV:-}
+        # Add your Google Drive folder URL here
+        MODEL_FOLDER_URL: "https://drive.google.com/drive/folders/1j-zo-DZWPp31IpWOlZpTkO-uz6Phu80W?usp=drive_link"
     environment:
-      # specify these parameters if you want to use basic auth for the model server
+      # Basic auth settings (optional)
       - BASIC_AUTH_USER=
       - BASIC_AUTH_PASS=
-      # set the log level for the model server
+      
+      # Logging level
       - LOG_LEVEL=DEBUG
-      # any other parameters that you want to pass to the model server
-      - ANY=PARAMETER
-      # specify the number of workers and threads for the model server
+      
+      # Workers and threads configuration
       - WORKERS=1
       - THREADS=8
-      # specify the model directory (likely you don't need to change this)
-      - MODEL_DIR=/home/azureuser/unet_line_segmentation/best_pid_unet.pth
+      
+      # Model directory
+      - MODEL_DIR=/data/models
+      
+      # Label Studio connection
+      - LABEL_STUDIO_URL=https://label-studio.aiengr.io
+      - LABEL_STUDIO_API_KEY=2df794e87e8d59d3957b5d7ba6af39c2fc876575
+      
+      # ML model specific settings (adjust path based on your folder structure)
+      - MODEL_PATH=/data/models/best_pid_unet.pth
+      - NUM_CLASSES=8
+      - IMG_SIZE=1024
+      
+      # Port configuration
+      - PORT=8080
 
-      # Specify the Label Studio URL and API key to access
-      # uploaded, local storage and cloud storage files.
-      # Do not use 'localhost' as it does not work within Docker containers.
-      # Use prefix 'http://' or 'https://' for the URL always.
-      # Determine the actual IP using 'ifconfig' (Linux/Mac) or 'ipconfig' (Windows).
-      - LABEL_STUDIO_URL= https://label-studio.aiengr.io
-      - LABEL_STUDIO_API_KEY= 2df794e87e8d59d3957b5d7ba6af39c2fc876575
     ports:
       - "8080:8080"
+
     volumes:
       - "./data/server:/data"
